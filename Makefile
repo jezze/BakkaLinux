@@ -1,46 +1,66 @@
-.PHONY: all clean
-
-export ARCH=arm
-export CROSS_COMPILE=arm-linux-gnueabi-
+.PHONY: all config iso docker clean distclean gitclean
 
 all: vmlinuz initramfs.cpio.gz
 
-initramfs.cpio.gz: initramfs.cpio
-	gzip -f initramfs.cpio
+config: linux/.config
 
-initramfs.cpio: rootfs
-	cd rootfs && ln -s sbin/init init
-	cd rootfs && find . | cpio --owner 0:0 -H newc -o > ../initramfs.cpio
+iso: bakka.iso
 
-rootfs: busybox/busybox linux/arch/x86/boot/bzImage
-	rm -fr rootfs
-	mkdir -p rootfs/bin rootfs/dev rootfs/etc rootfs/mnt \
-		rootfs/proc rootfs/tmp rootfs/sys rootfs/root
-	$(MAKE) -C busybox install CONFIG_PREFIX=../rootfs
-	$(MAKE) -C linux modules_install INSTALL_MOD_PATH=../rootfs
-	cp -r skel/* rootfs
+docker: bakka.tar
 
-vmlinuz: linux/arch/x86/boot/bzImage
-	cp linux/arch/x86/boot/bzImage ../vmlinuz
-System.map: linux/arch/x86/boot/bzImage
-	cp linux/System.map ../
-linux/arch/x86/boot/bzImage: linux/.config
-	$(MAKE) -C linux bzImage
-	$(MAKE) -C linux modules
+clean:
+	$(MAKE) -C base clean
+	rm -rf rootfs vmlinuz initramfs.cpio.gz isolinux/vmlinuz isolinux/initramfs.cpio.gz bakka.iso bakka.tar
+
+distclean: clean
+	$(MAKE) -C linux clean
+
+configclean: distclean
+	rm -rf linux/.config
+
+gitclean: clean
+	git clean -dffx && git checkout -f
+	cd linux && git clean -dffx && git checkout -f
+	cd sbase && git clean -dffx && git checkout -f
+	cd bash && git clean -dffx && git checkout -f
+
 linux/.config:
 	$(MAKE) -C linux defconfig
 
+linux/arch/x86/boot/bzImage: linux/.config
+	$(MAKE) -C linux bzImage
 
-busybox/busybox: busybox/.config
-	$(MAKE) -C busybox
-busybox/.config:
-	$(MAKE) -C busybox defconfig
-	echo "CONFIG_STATIC=y" >> busybox/.config
+sbase/sbase-box:
+	$(MAKE) -C sbase CC=musl-gcc LDFLAGS=-static DESTDIR=../rootfs PREFIX=/ sbase-box
 
-clean:
-	$(MAKE) -C busybox clean
-	$(MAKE) -C linux clean
-	rm -f vmlinuz
-	rm -f System.map
-	rm -f initramfs.cpio.gz
-	rm -fr rootfs
+bash/bash:
+	cd bash && ./configure --enable-static-link --without-bash-malloc --without-libiconv-prefix --without-libintl-prefix CC=musl-gcc CFLAGS=-static
+	$(MAKE) -C bash
+
+rootfs: linux/arch/x86/boot/bzImage sbase/sbase-box bash/bash
+	mkdir -p $@/bin $@/dev $@/proc $@/root $@/sys $@/tmp
+	$(MAKE) -C sbase CC=musl-gcc LDFLAGS=-static DESTDIR=../rootfs PREFIX=/ sbase-box-install
+	$(MAKE) -C base
+	rm -rf $@/share
+	cp bash/bash $@/bin
+	ln -s bash $@/bin/sh
+	cp base/init $@
+
+vmlinuz: linux/arch/x86/boot/bzImage
+	cp $^ $@
+
+initramfs.cpio.gz: rootfs
+	cd $^ && find . | cpio --owner 0:0 -H newc -o | gzip > ../$@
+
+isolinux/vmlinuz: vmlinuz
+	cp $^ $@
+
+isolinux/initramfs.cpio.gz: initramfs.cpio.gz
+	cp $^ $@
+
+bakka.tar: rootfs
+	tar -cf $@ $^ --transform='s/^rootfs\///'
+
+bakka.iso: isolinux/vmlinuz isolinux/initramfs.cpio.gz
+	mkisofs -b isolinux.bin -c boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -l -input-charset default -V bakka -A "bakka" -o $@ isolinux
+

@@ -1,6 +1,9 @@
-[submodule "src/busybox"]
-	path = busybox
-	url = git://git.busybox.net/busybox
 [submodule "src/linux"]
 	path = linux
 	url = git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+[submodule "sbase"]
+	path = sbase
+	url = git://git.suckless.org/sbase
+[submodule "bash"]
+	path = bash
+	url = https://git.savannah.gnu.org/git/bash.git

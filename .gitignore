@@ -1,6 +1,0 @@
-uImage
-rootfs/
-rootfs.cpio
-rootfs.cpio.gz
-devicetree.dtb
-uramdisk.image.gz
