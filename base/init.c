@@ -75,8 +75,10 @@ static void monitor(struct tty *ttys, unsigned int count, pid_t pid)
     for (i = 0; i < count; i++)
     {
 
-        if (pid == ttys[i].pid)
-            ttys[i].pid = mktty(&ttys[i]);
+        struct tty *tty = &ttys[i];
+
+        if (tty->pid == pid)
+            tty->pid = mktty(tty);
 
     }
 
