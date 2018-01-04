@@ -6,12 +6,13 @@
 #include <sys/reboot.h>
 #include <sys/wait.h>
 
-struct tty
+struct process
 {
 
     pid_t pid;
-    char *path;
     char **cmd;
+    char *tty;
+    int restart;
 
 };
 
@@ -37,7 +38,25 @@ static void destroy(void)
 
 }
 
-static pid_t mktty(struct tty *tty)
+static void mktty(char *tty)
+{
+
+    int fd = open(tty, O_RDWR);
+
+    if (fd < 0)
+        exit(EXIT_FAILURE);
+
+    if (!isatty(fd))
+        exit(EXIT_FAILURE);
+
+    dup2(fd, STDIN_FILENO);
+    dup2(fd, STDOUT_FILENO);
+    dup2(fd, STDERR_FILENO);
+    close(fd);
+
+}
+
+static pid_t mkproc(struct process *p)
 {
 
     pid_t pid = fork();
@@ -45,20 +64,11 @@ static pid_t mktty(struct tty *tty)
     if (!pid)
     {
 
-        int fd = open(tty->path, O_RDWR);
+        if (p->tty)
+            mktty(p->tty);
 
-        if (fd < 0)
-            exit(EXIT_FAILURE);
-
-        if (!isatty(fd))
-            exit(EXIT_FAILURE);
-
-        dup2(fd, STDIN_FILENO);
-        dup2(fd, STDOUT_FILENO);
-        dup2(fd, STDERR_FILENO);
-        close(fd);
         setsid();
-        execvp(tty->cmd[0], tty->cmd);
+        execvp(p->cmd[0], p->cmd);
         exit(EXIT_FAILURE);
 
     }
@@ -67,18 +77,16 @@ static pid_t mktty(struct tty *tty)
 
 }
 
-static void monitor(struct tty *ttys, unsigned int count, pid_t pid)
+static void monitor(struct process *ps, pid_t pid)
 {
 
-    unsigned int i;
+    struct process *p;
 
-    for (i = 0; i < count; i++)
+    for (p = ps; p->cmd; p++)
     {
 
-        struct tty *tty = &ttys[i];
-
-        if (tty->pid == pid)
-            tty->pid = mktty(tty);
+        if (!pid || (p->pid == pid && p->restart))
+            p->pid = mkproc(p);
 
     }
 
@@ -90,16 +98,17 @@ int main(void)
     sigset_t set;
     pid_t child;
     char *cmd[] = {"/bin/sh", "-l", NULL};
-    struct tty ttys[] = {
-        {0, "/dev/tty1", cmd},
-        {0, "/dev/ttyS0", cmd}
+    struct process ps[] = {
+        {0, cmd, "/dev/tty1", 1},
+        {0, cmd, "/dev/ttyS0", 1},
+        {0, NULL}
     };
 
     if (getpid() != 1)
         return EXIT_FAILURE;
 
     init();
-    monitor(ttys, 2, 0);
+    monitor(ps, 0);
     sigfillset(&set);
     sigprocmask(SIG_BLOCK, &set, NULL);
 
@@ -139,7 +148,7 @@ int main(void)
 
         case SIGCHLD:
             while ((child = waitpid(-1, NULL, WNOHANG)) > 0)
-                monitor(ttys, 2, child);
+                monitor(ps, child);
 
             break;
 
